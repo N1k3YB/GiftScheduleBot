@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/nkeydash/GiftScheduleBot/db"
+	"github.com/N1k3YB/GiftScheduleBot/db"
 	"github.com/robfig/cron/v3"
 	tele "gopkg.in/telebot.v3"
 )

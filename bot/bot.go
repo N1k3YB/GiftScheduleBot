@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nkeydash/GiftScheduleBot/config"
-	"github.com/nkeydash/GiftScheduleBot/db"
+	"github.com/N1k3YB/GiftScheduleBot/config"
+	"github.com/N1k3YB/GiftScheduleBot/db"
 	tele "gopkg.in/telebot.v3"
 )
 

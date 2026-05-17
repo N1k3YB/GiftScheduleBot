@@ -5,9 +5,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/nkeydash/GiftScheduleBot/config"
-	"github.com/nkeydash/GiftScheduleBot/db"
-	"github.com/nkeydash/GiftScheduleBot/parser"
+	"github.com/N1k3YB/GiftScheduleBot/config"
+	"github.com/N1k3YB/GiftScheduleBot/db"
+	"github.com/N1k3YB/GiftScheduleBot/parser"
 	tele "gopkg.in/telebot.v3"
 )
 
