@@ -4,4 +4,3 @@
 *.db-wal
 /bin/
 /vendor/
-go.sum

@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 
-	"github.com/nkeydash/GiftScheduleBot/bot"
-	"github.com/nkeydash/GiftScheduleBot/config"
-	"github.com/nkeydash/GiftScheduleBot/db"
+	"github.com/N1k3YB/GiftScheduleBot/bot"
+	"github.com/N1k3YB/GiftScheduleBot/config"
+	"github.com/N1k3YB/GiftScheduleBot/db"
 )
 
 func main() {

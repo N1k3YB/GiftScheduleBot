@@ -1,4 +1,4 @@
-module github.com/nkeydash/GiftScheduleBot
+module github.com/N1k3YB/GiftScheduleBot
 
 go 1.22
 
