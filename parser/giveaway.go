@@ -17,7 +17,17 @@ func NormalizeText(s string) string {
 			continue
 		case r >= 0xFE00 && r <= 0xFE0F:
 			continue
-		case r == 0x200C || r == 0x200D:
+		case r >= 0x2000 && r <= 0x200F:
+			continue
+		case r >= 0x2028 && r <= 0x202F:
+			continue
+		case r == 0x00AD:
+			continue
+		case r == 0x034F:
+			continue
+		case r == 0x180E:
+			continue
+		case r == 0x2060:
 			continue
 		case r == 0xFEFF:
 			continue
@@ -28,7 +38,7 @@ func NormalizeText(s string) string {
 }
 
 var giveawayKeywords = regexp.MustCompile(
-	`(?i)(розыгрыш|разыгрываем|разыгрывается|разыгрывае|giveaway|раздаём|раздаем|раздача|розыгрышь|конкурс|призы\s+розыгрыш)`,
+	`(?i)(розыгрыш|разыгрываем|разыгрывается|разыгрывае|giveaway|раздаём|раздаем|раздача|розыгрышь|конкурс|призы\s+розыгрыш|итоги\s+розыгрыша|розыгрыша)`,
 )
 
 var prizeKeywords = regexp.MustCompile(

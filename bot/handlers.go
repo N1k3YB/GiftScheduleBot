@@ -104,8 +104,12 @@ func processForward(c tele.Context, u *db.User, msg *tele.Message) error {
 		msgID = int64(msg.OriginalMessageID)
 	}
 
+	if text == "" {
+		return c.Send("⚠️ Не удалось прочитать содержимое этого поста. Попробуй отправить ссылку на него.")
+	}
+
 	if !parser.IsGiveawayText(text) {
-		return c.Send("⚠️ Этот пост не является розыгрышем")
+		return c.Send("⚠️ Этот пост не похож на розыгрыш. Перешли пост с ключевыми словами: розыгрыш, конкурс, раздача и т.п.")
 	}
 
 	return processGiveawayText(c, u, msg, text, channelID, msgID, channelUsername, "")
@@ -254,7 +258,6 @@ func linkAndReply(c tele.Context, u *db.User, p *db.Post, isNewPost bool, parsed
 		sb.WriteString("✅ Розыгрыш добавлен!\n\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("🆔 ID: <b>#%d</b>\n", p.ID))
 	sb.WriteString(fmt.Sprintf("📌 <b>%s</b>\n", escapeHTML(p.Title)))
 
 	if p.EndDate != nil {
@@ -359,7 +362,7 @@ func showMyList(c tele.Context, u *db.User, page int) error {
 		}
 		btnLabel := string(shortTitle)
 		if btnLabel == "" {
-			btnLabel = fmt.Sprintf("#%d", p.ID)
+			btnLabel = "Без названия"
 		}
 		btnCheck := menu.Data(fmt.Sprintf("🔍 %s", btnLabel), fmt.Sprintf("check_result:%d", p.ID))
 		btnDel := menu.Data("🗑", fmt.Sprintf("del_my:%d", up.UserPostID))

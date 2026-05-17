@@ -251,14 +251,14 @@ func scanUserPosts(rows *sql.Rows) ([]UserPost, error) {
 func GetAllPosts(limit, offset int) ([]*Post, error) {
 	rows, err := DB.Query(`
 		SELECT id, telegram_msg_id, channel_username, channel_id, title, prizes,
-		       end_date, results_url, results_in_same_post, is_completed,
-		       source_url, content_parsed, raw_text, created_at
+		       end_date, has_end_time, results_url, results_in_same_post, is_completed,
+		       result_poll_started, dump_msg_id, source_url, content_parsed, raw_text, created_at
 		FROM posts ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanPosts(rows)
+	return scanPostsFull(rows)
 }
 
 func CountAllPosts() (int, error) {

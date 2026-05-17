@@ -48,6 +48,9 @@ func handleCallback(c tele.Context) error {
 	case "all_list":
 		_ = c.Respond()
 		return showAllList(c, int(parseInt64(arg)))
+	case "add_post":
+		_ = c.Respond()
+		return addPostToList(c, parseInt64(arg))
 	case "del_my":
 		_ = c.Respond()
 		return deleteMyPost(c, parseInt64(arg))
@@ -130,7 +133,7 @@ func showMainMenu(c tele.Context) error {
 }
 
 func showAllList(c tele.Context, page int) error {
-	const perPage = 10
+	const perPage = 5
 	total, _ := db.CountAllPosts()
 	if total == 0 {
 		menu := B.NewMarkup()
@@ -162,14 +165,58 @@ func showAllList(c tele.Context, page int) error {
 	}
 
 	menu := B.NewMarkup()
+	var rows []tele.Row
+	for i, p := range posts {
+		num := page*perPage + i + 1
+		row := []tele.Btn{menu.Data(fmt.Sprintf("➕ Добавить розыгрыш %d", num), fmt.Sprintf("add_post:%d", p.ID))}
+		if p.DumpMsgID != 0 {
+			row = append(row, menu.Data("📬", fmt.Sprintf("view_dump:%d", p.ID)))
+		}
+		rows = append(rows, menu.Row(row...))
+	}
 	navRow := buildNavRow(menu, "all_list", page, totalPages)
-	menu.Inline(
-		navRow,
-		menu.Row(menu.Data("🏠 Назад", "main_menu")),
-		menu.Row(menu.Data("❌ Закрыть", "close")),
-	)
+	rows = append(rows, navRow)
+	rows = append(rows, menu.Row(menu.Data("🏠 Назад", "main_menu")))
+	rows = append(rows, menu.Row(menu.Data("❌ Закрыть", "close")))
+	menu.Inline(rows...)
 
 	return editOrSend(c, sb.String(), menu)
+}
+
+func addPostToList(c tele.Context, postID int64) error {
+	sender := c.Sender()
+	if sender == nil {
+		return nil
+	}
+	u, err := db.GetUserByTelegramID(sender.ID)
+	if err != nil || u == nil {
+		return nil
+	}
+	p, err := db.GetPostByID(postID)
+	if err != nil {
+		return c.Send("❌ Розыгрыш не найден.")
+	}
+	already, _ := db.UserAlreadyHasPost(u.ID, postID)
+	if already {
+		return c.Send("ℹ️ Этот розыгрыш уже есть в твоём списке.")
+	}
+	if err := db.AddUserPost(u.ID, postID); err != nil {
+		return c.Send("❌ Ошибка при добавлении.")
+	}
+	title := p.Title
+	if title == "" {
+		title = fmt.Sprintf("#%d", postID)
+	}
+	menu := B.NewMarkup()
+	var rows []tele.Row
+	if p.DumpMsgID != 0 && config.C.DumpChatID != 0 {
+		rows = append(rows, menu.Row(menu.Data("📬 Посмотреть пост", fmt.Sprintf("view_dump:%d", postID))))
+	}
+	rows = append(rows, menu.Row(menu.Data("📋 Мои розыгрыши", "my_list:0")))
+	rows = append(rows, menu.Row(menu.Data("↩️ Назад", fmt.Sprintf("all_list:%d", 0))))
+	menu.Inline(rows...)
+	return c.Send(fmt.Sprintf("✅ Розыгрыш <b>%s</b> добавлен в твой список!", escapeHTML(title)),
+		&tele.SendOptions{ParseMode: tele.ModeHTML}, menu)
 }
 
 func deleteMyPost(c tele.Context, userPostID int64) error {
