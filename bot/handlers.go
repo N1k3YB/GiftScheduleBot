@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -112,7 +113,17 @@ func processForward(c tele.Context, u *db.User, msg *tele.Message) error {
 		return c.Send("⚠️ Этот пост не похож на розыгрыш. Перешли пост с ключевыми словами: розыгрыш, конкурс, раздача и т.п.")
 	}
 
-	return processGiveawayText(c, u, msg, text, channelID, msgID, channelUsername, "")
+	var dumpMsgID int64
+	if config.C.DumpChatID != 0 {
+		dumped, err := B.Forward(&tele.Chat{ID: config.C.DumpChatID}, msg)
+		if err != nil {
+			log.Printf("processForward: store to dump: %v", err)
+		} else if dumped != nil {
+			dumpMsgID = int64(dumped.ID)
+		}
+	}
+
+	return processGiveawayTextWithDump(c, u, text, channelID, msgID, channelUsername, "", dumpMsgID)
 }
 
 func processLink(c tele.Context, u *db.User, channelUser string, msgID int64, rawURL string) error {
@@ -127,7 +138,9 @@ func processLink(c tele.Context, u *db.User, channelUser string, msgID int64, ra
 			Chat: &tele.Chat{Username: channelUser},
 			ID:   int(msgID),
 		})
-		if err == nil && dumped != nil {
+		if err != nil {
+			log.Printf("processLink: forward @%s/%d to dump: %v", channelUser, msgID, err)
+		} else if dumped != nil {
 			dumpMsgID = int64(dumped.ID)
 			text = dumped.Text
 			if text == "" {
@@ -168,7 +181,9 @@ func processLinkByID(c tele.Context, u *db.User, rawChannelID, msgID int64, _ st
 			Chat: &tele.Chat{ID: channelID},
 			ID:   int(msgID),
 		})
-		if err == nil && dumped != nil {
+		if err != nil {
+			log.Printf("processLinkByID: forward chatID=%d msgID=%d to dump: %v", channelID, msgID, err)
+		} else if dumped != nil {
 			dumpMsgID = int64(dumped.ID)
 			text = dumped.Text
 			if text == "" {

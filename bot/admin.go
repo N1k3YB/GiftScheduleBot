@@ -499,19 +499,28 @@ func adminCheckConfig(c tele.Context) error {
 	sb.WriteString("<b>DUMP_CHAT_ID</b>\n")
 	if cfg.DumpChatID == 0 {
 		sb.WriteString(fmt.Sprintf("%s Не задан — бот не сможет читать содержимое постов по ссылке.\n", fail))
-		sb.WriteString("  → Создай приватный канал, добавь бота админом, укажи ID в DUMP_CHAT_ID\n")
+		sb.WriteString("  → Создай приватный канал/группу, добавь бота админом, укажи ID в DUMP_CHAT_ID\n")
 	} else {
 		sb.WriteString(fmt.Sprintf("  ID: <code>%d</code>\n", cfg.DumpChatID))
-		sent, err := B.Send(&tele.Chat{ID: cfg.DumpChatID}, "⚙️ проверка связи", &tele.SendOptions{})
+		sent, err := B.Send(&tele.Chat{ID: cfg.DumpChatID}, "⚙️ проверка связи (сейчас удалится)", &tele.SendOptions{})
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("%s Отправка не работает: %v\n", fail, err))
+			sb.WriteString(fmt.Sprintf("%s Отправка не работает: <code>%v</code>\n", fail, err))
 			sb.WriteString("  → Убедись, что бот добавлен в чат как администратор\n")
 		} else {
 			sb.WriteString(fmt.Sprintf("%s Отправка работает\n", ok))
 			if err2 := B.Delete(sent); err2 != nil {
-				sb.WriteString(fmt.Sprintf("%s Удаление не работает — добавь боту право удалять сообщения\n", warn))
+				sb.WriteString(fmt.Sprintf("%s Удаление не работает: <code>%v</code>\n  → Дай боту право удалять сообщения\n", warn, err2))
 			} else {
 				sb.WriteString(fmt.Sprintf("%s Удаление работает\n", ok))
+			}
+			fwdTest, err2 := B.Forward(&tele.Chat{ID: cfg.DumpChatID}, sent)
+			if err2 != nil {
+				sb.WriteString(fmt.Sprintf("%s Пересылка (forward) не работает: <code>%v</code>\n", fail, err2))
+				sb.WriteString("  → Именно эта операция нужна для сохранения постов.\n")
+				sb.WriteString("  → Возможные причины: канал-источник запрещает пересылку, или бот не имеет прав.\n")
+			} else {
+				sb.WriteString(fmt.Sprintf("%s Пересылка (forward) работает\n", ok))
+				B.Delete(fwdTest)
 			}
 		}
 	}
