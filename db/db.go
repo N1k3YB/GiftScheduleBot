@@ -64,11 +64,26 @@ func migrate() {
 		`CREATE INDEX IF NOT EXISTS idx_user_posts_user ON user_posts(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_posts_post ON user_posts(post_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_posts_end_date ON posts(end_date)`,
+		`CREATE TABLE IF NOT EXISTS banned_posts (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			telegram_msg_id  INTEGER,
+			channel_id       INTEGER,
+			channel_username TEXT,
+			full_text        TEXT,
+			banned_at        DATETIME NOT NULL DEFAULT (datetime('now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_banned_posts ON banned_posts(channel_id, telegram_msg_id)`,
 		`PRAGMA foreign_keys = ON`,
 	}
 	for _, s := range stmts {
 		if _, err := DB.Exec(s); err != nil {
 			log.Fatalf("migration failed: %v\nSQL: %s", err, s)
 		}
+	}
+	for _, s := range []string{
+		`ALTER TABLE posts ADD COLUMN has_end_time BOOLEAN NOT NULL DEFAULT 0`,
+		`ALTER TABLE posts ADD COLUMN result_poll_started BOOLEAN NOT NULL DEFAULT 0`,
+	} {
+		DB.Exec(s)
 	}
 }

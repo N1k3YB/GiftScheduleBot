@@ -19,6 +19,10 @@ func StartScheduler() {
 		runExpiredCheck()
 	})
 
+	c.AddFunc("*/5 * * * *", func() {
+		runResultPoll()
+	})
+
 	c.Start()
 	log.Println("scheduler started")
 }
@@ -99,6 +103,28 @@ func buildCompletedText(p *db.Post) string {
 	return text
 }
 
+func runResultPoll() {
+	posts, err := db.GetPostsForResultPoll()
+	if err != nil {
+		log.Printf("scheduler: result poll query: %v", err)
+		return
+	}
+	for _, p := range posts {
+		if err := db.MarkCompleted(p.ID); err != nil {
+			log.Printf("scheduler: mark completed #%d: %v", p.ID, err)
+			continue
+		}
+		users, err := db.GetUsersForPost(p.ID, "all")
+		if err != nil {
+			continue
+		}
+		text := buildCompletedText(p)
+		for _, u := range users {
+			sendNotify(u.TelegramID, text)
+		}
+	}
+}
+
 func sendNotify(telegramID int64, text string) {
 	if B == nil {
 		return
@@ -106,7 +132,7 @@ func sendNotify(telegramID int64, text string) {
 	_, err := B.Send(
 		&tele.Chat{ID: telegramID},
 		text,
-		&tele.SendOptions{ParseMode: tele.ModeHTML},
+		&tele.SendOptions{ParseMode: tele.ModeHTML, DisableWebPagePreview: true},
 	)
 	if err != nil {
 		log.Printf("scheduler: send to %d: %v", telegramID, err)

@@ -10,10 +10,11 @@ import (
 )
 
 type Config struct {
-	BotToken   string
-	DBPath     string
-	DumpChatID int64
-	AdminIDs   []int64
+	BotToken    string
+	DBPath      string
+	DumpChatID  int64
+	AdminChatID int64
+	AdminIDs    []int64
 }
 
 var C Config
@@ -30,6 +31,13 @@ func Load() {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if err == nil {
 			C.DumpChatID = id
+		}
+	}
+
+	if raw := os.Getenv("ADMIN_CHAT_ID"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil {
+			C.AdminChatID = id
 		}
 	}
 

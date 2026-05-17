@@ -72,14 +72,12 @@ func mainMenuMarkup() *tele.ReplyMarkup {
 	menu := B.NewMarkup()
 	menu.Inline(
 		menu.Row(
-			menu.Data("🎁 Добавить розыгрыш", "noop", "noop"),
-		),
-		menu.Row(
 			menu.Data("📋 Мои розыгрыши", "my_list:0"),
 			menu.Data("🌐 Все розыгрыши", "all_list:0"),
 		),
 		menu.Row(
 			menu.Data("👤 Профиль", "profile"),
+			menu.Data("🆘 Техподдержка", "support_start"),
 		),
 		menu.Row(
 			menu.Data("❌ Закрыть", "close"),
@@ -115,6 +113,13 @@ func handleStart(c tele.Context) error {
 func PostLink(p *db.Post) string {
 	if p.ChannelUsername != "" {
 		return fmt.Sprintf("https://t.me/%s/%d", strings.TrimPrefix(p.ChannelUsername, "@"), p.TelegramMsgID)
+	}
+	if p.ChannelID < 0 && p.TelegramMsgID > 0 {
+		cidStr := fmt.Sprintf("%d", -p.ChannelID)
+		if len(cidStr) > 3 {
+			cidStr = cidStr[3:]
+		}
+		return fmt.Sprintf("https://t.me/c/%s/%d", cidStr, p.TelegramMsgID)
 	}
 	if p.SourceURL != "" {
 		return p.SourceURL

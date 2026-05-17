@@ -7,6 +7,26 @@ import (
 	"unicode"
 )
 
+var msk = time.FixedZone("MSK", 3*3600)
+
+func NormalizeText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 0xE000 && r <= 0xF8FF:
+			continue
+		case r >= 0xFE00 && r <= 0xFE0F:
+			continue
+		case r == 0x200C || r == 0x200D:
+			continue
+		case r == 0xFEFF:
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 var giveawayKeywords = regexp.MustCompile(
 	`(?i)(розыгрыш|разыгрываем|разыгрывается|разыгрывае|giveaway|раздаём|раздаем|раздача|розыгрышь|конкурс|призы\s+розыгрыш)`,
 )
@@ -35,9 +55,11 @@ var monthNames = map[string]time.Month{
 }
 
 var (
-	reDMY     = regexp.MustCompile(`\b(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})\b`)
-	reDMonthY = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|january|february|march|april|june|july|august|september|october|november|december)\s*(\d{4})?\b`)
-	reDMonth  = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b`)
+	reDMY      = regexp.MustCompile(`\b(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})\b`)
+	reDMonthY  = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|january|february|march|april|june|july|august|september|october|november|december)\s*(\d{4})?\b`)
+	reDMonth   = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b`)
+	reTime     = regexp.MustCompile(`\b(?:в\s*)?(\d{1,2})[:. ](\d{2})\s*(?:мск|msk|по\s+москве)?\b`)
+	reRelative = regexp.MustCompile(`(?i)\b(сегодня|завтра|послезавтра|через\s+(\d+)\s+д(?:ень|ня|ней))\b`)
 )
 
 type GiveawayInfo struct {
@@ -45,11 +67,13 @@ type GiveawayInfo struct {
 	Title             string
 	Prizes            []string
 	EndDate           *time.Time
+	HasEndTime        bool
 	ResultsInSamePost bool
 	HasResults        bool
 }
 
-func ParseGiveaway(text string) GiveawayInfo {
+func ParseGiveaway(rawText string) GiveawayInfo {
+	text := NormalizeText(rawText)
 	info := GiveawayInfo{}
 	if !giveawayKeywords.MatchString(text) {
 		return info
@@ -57,14 +81,14 @@ func ParseGiveaway(text string) GiveawayInfo {
 	info.IsGiveaway = true
 	info.Title = extractTitle(text)
 	info.Prizes = extractPrizes(text)
-	info.EndDate = extractDate(text)
+	info.EndDate, info.HasEndTime = extractDate(text)
 	info.ResultsInSamePost = samePostResultsKeywords.MatchString(text)
 	info.HasResults = resultsKeywords.MatchString(text)
 	return info
 }
 
 func IsGiveawayText(text string) bool {
-	return giveawayKeywords.MatchString(text)
+	return giveawayKeywords.MatchString(NormalizeText(text))
 }
 
 func extractTitle(text string) string {
@@ -110,17 +134,50 @@ func extractPrizes(text string) []string {
 	return prizes
 }
 
-func extractDate(text string) *time.Time {
-	now := time.Now()
+func extractDate(text string) (*time.Time, bool) {
+	now := time.Now().In(msk)
+
+	if m := reRelative.FindStringSubmatch(text); m != nil {
+		kw := strings.ToLower(m[1])
+		var base time.Time
+		switch {
+		case strings.HasPrefix(kw, "сегодня"):
+			base = now
+		case strings.HasPrefix(kw, "завтра"):
+			base = now.AddDate(0, 0, 1)
+		case strings.HasPrefix(kw, "послезавтра"):
+			base = now.AddDate(0, 0, 2)
+		default:
+			days := parseInt(m[2])
+			if days > 0 {
+				base = now.AddDate(0, 0, days)
+			}
+		}
+		if !base.IsZero() {
+			h, mi := extractTime(text)
+			hasTime := h >= 0
+			if !hasTime {
+				h, mi = 0, 0
+			}
+			t := time.Date(base.Year(), base.Month(), base.Day(), h, mi, 0, 0, msk)
+			return &t, hasTime
+		}
+	}
+
 	if m := reDMY.FindStringSubmatch(text); m != nil {
 		d, mo, y := parseInt(m[1]), parseInt(m[2]), parseInt(m[3])
 		if y < 100 {
 			y += 2000
 		}
 		if d > 0 && d <= 31 && mo > 0 && mo <= 12 {
-			t := time.Date(y, time.Month(mo), d, 23, 59, 0, 0, time.Local)
+			h, mi := extractTime(text)
+			hasTime := h >= 0
+			if !hasTime {
+				h, mi = 0, 0
+			}
+			t := time.Date(y, time.Month(mo), d, h, mi, 0, 0, msk)
 			if t.After(now) {
-				return &t
+				return &t, hasTime
 			}
 		}
 	}
@@ -132,9 +189,14 @@ func extractDate(text string) *time.Time {
 			y = parseInt(m[3])
 		}
 		if d > 0 && d <= 31 && mo > 0 {
-			t := time.Date(y, mo, d, 23, 59, 0, 0, time.Local)
+			h, mi := extractTime(text)
+			hasTime := h >= 0
+			if !hasTime {
+				h, mi = 0, 0
+			}
+			t := time.Date(y, mo, d, h, mi, 0, 0, msk)
 			if t.After(now) {
-				return &t
+				return &t, hasTime
 			}
 		}
 	}
@@ -143,14 +205,29 @@ func extractDate(text string) *time.Time {
 		mo := monthNames[strings.ToLower(m[2])]
 		y := now.Year()
 		if d > 0 && d <= 31 && mo > 0 {
-			t := time.Date(y, mo, d, 23, 59, 0, 0, time.Local)
-			if t.Before(now) {
-				t = time.Date(y+1, mo, d, 23, 59, 0, 0, time.Local)
+			h, mi := extractTime(text)
+			hasTime := h >= 0
+			if !hasTime {
+				h, mi = 0, 0
 			}
-			return &t
+			t := time.Date(y, mo, d, h, mi, 0, 0, msk)
+			if t.Before(now) {
+				t = time.Date(y+1, mo, d, h, mi, 0, 0, msk)
+			}
+			return &t, hasTime
 		}
 	}
-	return nil
+	return nil, false
+}
+
+func extractTime(text string) (hour, min int) {
+	if m := reTime.FindStringSubmatch(text); m != nil {
+		h, mm := parseInt(m[1]), parseInt(m[2])
+		if h >= 0 && h <= 23 && mm >= 0 && mm <= 59 {
+			return h, mm
+		}
+	}
+	return -1, 0
 }
 
 func parseInt(s string) int {

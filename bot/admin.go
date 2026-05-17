@@ -306,7 +306,10 @@ func adminPostDetail(c tele.Context, postID int64) error {
 	if !p.IsCompleted {
 		rows = append(rows, menu.Row(menu.Data("✅ Завершить", fmt.Sprintf("admin_complete_post:%d", postID))))
 	}
-	rows = append(rows, menu.Row(menu.Data("🗑 Удалить из БД", fmt.Sprintf("admin_del_post:%d", postID))))
+	rows = append(rows, menu.Row(
+		menu.Data("🗑 Удалить", fmt.Sprintf("admin_del_post:%d", postID)),
+		menu.Data("🚫 Забанить", fmt.Sprintf("admin_ban_post:%d", postID)),
+	))
 	rows = append(rows, menu.Row(menu.Data("◀️ Назад", "admin_posts:0")))
 	menu.Inline(rows...)
 
@@ -335,10 +338,51 @@ func adminCompletePost(c tele.Context, postID int64) error {
 	}
 	_ = c.Respond()
 
+	p, err := db.GetPostByID(postID)
+	if err != nil {
+		return editOrSend(c, "❌ Ошибка.", nil)
+	}
 	if err := db.MarkCompleted(postID); err != nil {
 		return editOrSend(c, "❌ Ошибка.", nil)
 	}
-	return adminPostDetail(c, postID)
+
+	users, _ := db.GetPostSubscribers(postID)
+	link := PostLink(p)
+	title := p.Title
+	if title == "" {
+		title = fmt.Sprintf("#%d", postID)
+	}
+	for _, uid := range users {
+		var msg strings.Builder
+		msg.WriteString(fmt.Sprintf("🏁 Розыгрыш <b>%s</b> завершён!\n\n", escapeHTML(title)))
+		msg.WriteString("За результатами загляни на канал розыгрыша.")
+		if link != "" {
+			msg.WriteString(fmt.Sprintf("\n🔗 <a href=\"%s\">Открыть пост</a>", link))
+		}
+		B.Send(&tele.User{ID: uid}, msg.String(), &tele.SendOptions{
+			ParseMode:             tele.ModeHTML,
+			DisableWebPagePreview: true,
+		})
+	}
+
+	menu := B.NewMarkup()
+	menu.Inline(menu.Row(menu.Data("◀️ К посту", fmt.Sprintf("admin_post:%d", postID))))
+	return editOrSend(c, fmt.Sprintf("✅ Розыгрыш #%d завершён, подписчики оповещены.", postID), menu)
+}
+
+func adminBanPost(c tele.Context, postID int64) error {
+	sender := c.Sender()
+	if sender == nil || !config.IsAdmin(sender.ID) {
+		return c.Respond()
+	}
+	_ = c.Respond()
+
+	if err := db.BanPost(postID); err != nil {
+		return editOrSend(c, "❌ Ошибка бана.", nil)
+	}
+	menu := B.NewMarkup()
+	menu.Inline(menu.Row(menu.Data("◀️ Список постов", "admin_posts:0")))
+	return editOrSend(c, fmt.Sprintf("🚫 Розыгрыш #%d забанен и удалён из БД.", postID), menu)
 }
 
 func adminBroadcastPrompt(c tele.Context) error {

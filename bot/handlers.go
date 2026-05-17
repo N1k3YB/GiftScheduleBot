@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/N1k3YB/GiftScheduleBot/config"
 	"github.com/N1k3YB/GiftScheduleBot/db"
@@ -20,8 +21,14 @@ func handleText(c tele.Context) error {
 	}
 	sender := c.Sender()
 	if sender != nil {
+		if msg.Chat != nil && msg.Chat.ID == config.C.AdminChatID && msg.ReplyTo != nil {
+			return handleAdminReply(c)
+		}
 		if handled := HandleAdminText(c, sender.ID); handled {
 			return nil
+		}
+		if isInSupport(sender.ID) {
+			return handleSupportMessage(c)
 		}
 	}
 	u := getDBUser(c)
@@ -33,7 +40,7 @@ func handleText(c tele.Context) error {
 		return processForward(c, u, msg)
 	}
 
-	text := msg.Text
+	text := parser.NormalizeText(msg.Text)
 	if m := reTMeLink.FindStringSubmatch(text); m != nil {
 		return processLink(c, u, m[1], parseInt64(m[2]), text)
 	}
@@ -73,9 +80,9 @@ func handleMedia(c tele.Context) error {
 }
 
 func processForward(c tele.Context, u *db.User, msg *tele.Message) error {
-	text := msg.Text
+	text := parser.NormalizeText(msg.Text)
 	if text == "" {
-		text = msg.Caption
+		text = parser.NormalizeText(msg.Caption)
 	}
 
 	var channelID int64
@@ -89,7 +96,7 @@ func processForward(c tele.Context, u *db.User, msg *tele.Message) error {
 	}
 
 	if !parser.IsGiveawayText(text) {
-		return c.Send("⚠️ Не похоже на пост с розыгрышем. Убедись, что в посте есть слова \"розыгрыш\", \"разыгрываем\" и т.д.")
+		return c.Send("⚠️ Этот пост не является розыгрышем")
 	}
 
 	return processGiveawayText(c, u, msg, text, channelID, msgID, channelUsername, "")
@@ -123,7 +130,7 @@ func processLink(c tele.Context, u *db.User, channelUser string, msgID int64, ra
 		}
 		created, isNew, err := db.CreateOrGetPost(p)
 		if err != nil {
-			return c.Send("❌ Ошибка при сохранении.")
+			return c.Send("❌ Ошибка при сохранении")
 		}
 		return linkAndReply(c, u, created, isNew, false)
 	}
@@ -134,7 +141,10 @@ func processLink(c tele.Context, u *db.User, channelUser string, msgID int64, ra
 func processGiveawayText(c tele.Context, u *db.User, _ *tele.Message, text string, channelID, msgID int64, channelUser, sourceURL string) error {
 	info := parser.ParseGiveaway(text)
 	if !info.IsGiveaway {
-		return c.Send("⚠️ В тексте не обнаружено ключевых слов розыгрыша (\"розыгрыш\", \"разыгрываем\", \"giveaway\" и т.д.)")
+		return c.Send("⚠️ Данный пост не является розыгрышем")
+	}
+	if info.EndDate != nil && info.EndDate.Before(time.Now()) {
+		return c.Send("⚠️ Дата завершения этого розыгрыша уже прошла.")
 	}
 
 	p := &db.Post{
@@ -143,6 +153,7 @@ func processGiveawayText(c tele.Context, u *db.User, _ *tele.Message, text strin
 		ChannelID:         channelID,
 		Title:             info.Title,
 		EndDate:           info.EndDate,
+		HasEndTime:        info.HasEndTime,
 		ResultsInSamePost: info.ResultsInSamePost,
 		SourceURL:         sourceURL,
 		ContentParsed:     true,
@@ -169,11 +180,11 @@ func linkAndReply(c tele.Context, u *db.User, p *db.Post, isNewPost bool, parsed
 
 	var sb strings.Builder
 	if alreadyHas {
-		sb.WriteString("ℹ️ Этот розыгрыш уже есть в твоём списке.\n\n")
+		sb.WriteString("ℹ️ Этот розыгрыш уже есть в списке.\n\n")
 	} else if isNewPost {
-		sb.WriteString("✅ Розыгрыш добавлен в общий список!\n\n")
+		sb.WriteString("✅ Розыгрыш добавлен!\n\n")
 	} else {
-		sb.WriteString("✅ Розыгрыш сохранён из общего списка!\n\n")
+		sb.WriteString("✅ Розыгрыш добавлен!\n\n")
 	}
 
 	sb.WriteString(fmt.Sprintf("🆔 ID: <b>#%d</b>\n", p.ID))
@@ -198,7 +209,7 @@ func linkAndReply(c tele.Context, u *db.User, p *db.Post, isNewPost bool, parsed
 		sb.WriteString(fmt.Sprintf("🔗 <a href=\"%s\">Открыть пост</a>\n", link))
 	}
 	if !parsed {
-		sb.WriteString("\n⚠️ Содержимое поста недоступно (бот не в канале). Сохранена только ссылка.")
+		sb.WriteString("\n⚠️ Содержимое поста недоступно. Сохранена только ссылка.")
 	}
 
 	menu := B.NewMarkup()
@@ -206,7 +217,7 @@ func linkAndReply(c tele.Context, u *db.User, p *db.Post, isNewPost bool, parsed
 		menu.Row(menu.Data("📋 Мои розыгрыши", "my_list:0")),
 		menu.Row(menu.Data("🏠 Главное меню", "main_menu")),
 	)
-	return c.Send(sb.String(), &tele.SendOptions{ParseMode: tele.ModeHTML}, menu)
+	return c.Send(sb.String(), &tele.SendOptions{ParseMode: tele.ModeHTML, DisableWebPagePreview: true}, menu)
 }
 
 func handleMyList(c tele.Context) error {
@@ -269,11 +280,15 @@ func showMyList(c tele.Context, u *db.User, page int) error {
 
 	for _, up := range posts {
 		p := &up.Post
-		title := p.Title
-		if len(title) > 20 {
-			title = title[:20] + "…"
+		shortTitle := []rune(p.Title)
+		if len(shortTitle) > 18 {
+			shortTitle = append(shortTitle[:18], '…')
 		}
-		btnCheck := menu.Data(fmt.Sprintf("🔍 #%d", p.ID), fmt.Sprintf("check_result:%d", p.ID))
+		btnLabel := string(shortTitle)
+		if btnLabel == "" {
+			btnLabel = fmt.Sprintf("#%d", p.ID)
+		}
+		btnCheck := menu.Data(fmt.Sprintf("🔍 %s", btnLabel), fmt.Sprintf("check_result:%d", p.ID))
 		btnDel := menu.Data("🗑", fmt.Sprintf("del_my:%d", up.UserPostID))
 		rows = append(rows, menu.Row(btnCheck, btnDel))
 	}
@@ -295,7 +310,7 @@ func buildNavRow(menu *tele.ReplyMarkup, prefix string, page, total int) tele.Ro
 }
 
 func editOrSend(c tele.Context, text string, markup *tele.ReplyMarkup) error {
-	opts := &tele.SendOptions{ParseMode: tele.ModeHTML}
+	opts := &tele.SendOptions{ParseMode: tele.ModeHTML, DisableWebPagePreview: true}
 	if c.Callback() != nil {
 		return c.Edit(text, opts, markup)
 	}

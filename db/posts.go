@@ -13,9 +13,11 @@ type Post struct {
 	Title             string
 	Prizes            string
 	EndDate           *time.Time
+	HasEndTime        bool
 	ResultsURL        string
 	ResultsInSamePost bool
 	IsCompleted       bool
+	ResultPollStarted bool
 	SourceURL         string
 	ContentParsed     bool
 	RawText           string
@@ -37,11 +39,11 @@ func CreateOrGetPost(p *Post) (*Post, bool, error) {
 
 	res, err := DB.Exec(`
 		INSERT INTO posts (telegram_msg_id, channel_username, channel_id, title, prizes,
-		                   end_date, results_url, results_in_same_post, source_url,
+		                   end_date, has_end_time, results_url, results_in_same_post, source_url,
 		                   content_parsed, raw_text)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.TelegramMsgID, p.ChannelUsername, p.ChannelID, p.Title, p.Prizes,
-		p.EndDate, p.ResultsURL, p.ResultsInSamePost, p.SourceURL,
+		p.EndDate, p.HasEndTime, p.ResultsURL, p.ResultsInSamePost, p.SourceURL,
 		p.ContentParsed, p.RawText,
 	)
 	if err != nil {
@@ -52,11 +54,78 @@ func CreateOrGetPost(p *Post) (*Post, bool, error) {
 	return created, true, err
 }
 
+func IsBannedPost(channelID, msgID int64) bool {
+	var count int
+	DB.QueryRow(`SELECT COUNT(*) FROM banned_posts WHERE channel_id=? AND telegram_msg_id=?`,
+		channelID, msgID).Scan(&count)
+	return count > 0
+}
+
+func BanPost(postID int64) error {
+	p, err := GetPostByID(postID)
+	if err != nil {
+		return err
+	}
+	_, err = DB.Exec(`
+		INSERT OR IGNORE INTO banned_posts (telegram_msg_id, channel_id, channel_username, full_text)
+		VALUES (?, ?, ?, ?)`,
+		p.TelegramMsgID, p.ChannelID, p.ChannelUsername, p.RawText)
+	if err != nil {
+		return err
+	}
+	_, err = DB.Exec(`DELETE FROM posts WHERE id = ?`, postID)
+	return err
+}
+
+func GetPostsForResultPoll() ([]*Post, error) {
+	rows, err := DB.Query(`
+		SELECT id, telegram_msg_id, channel_username, channel_id, title, prizes,
+		       end_date, has_end_time, results_url, results_in_same_post, is_completed,
+		       result_poll_started, source_url, content_parsed, raw_text, created_at
+		FROM posts
+		WHERE is_completed = 0
+		  AND end_date IS NOT NULL
+		  AND (
+		    (has_end_time = 1 AND end_date <= datetime('now'))
+		    OR
+		    (has_end_time = 0 AND date(end_date) <= date('now'))
+		  )`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPostsFull(rows)
+}
+
+func GetPostSubscribers(postID int64) ([]int64, error) {
+	rows, err := DB.Query(`
+		SELECT u.telegram_id FROM user_posts up
+		JOIN users u ON u.id = up.user_id
+		WHERE up.post_id = ? AND u.is_banned = 0`, postID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids, rows.Err()
+}
+
+func MarkResultPollStarted(postID int64) error {
+	_, err := DB.Exec(`UPDATE posts SET result_poll_started = 1 WHERE id = ?`, postID)
+	return err
+}
+
 func GetPostByID(id int64) (*Post, error) {
 	row := DB.QueryRow(`
 		SELECT id, telegram_msg_id, channel_username, channel_id, title, prizes,
-		       end_date, results_url, results_in_same_post, is_completed,
-		       source_url, content_parsed, raw_text, created_at
+		       end_date, has_end_time, results_url, results_in_same_post, is_completed,
+		       result_poll_started, source_url, content_parsed, raw_text, created_at
 		FROM posts WHERE id = ?`, id)
 	return scanPost(row)
 }
@@ -65,9 +134,9 @@ func scanPost(row *sql.Row) (*Post, error) {
 	p := &Post{}
 	err := row.Scan(
 		&p.ID, &p.TelegramMsgID, &p.ChannelUsername, &p.ChannelID,
-		&p.Title, &p.Prizes, &p.EndDate, &p.ResultsURL,
+		&p.Title, &p.Prizes, &p.EndDate, &p.HasEndTime, &p.ResultsURL,
 		&p.ResultsInSamePost, &p.IsCompleted,
-		&p.SourceURL, &p.ContentParsed, &p.RawText, &p.CreatedAt,
+		&p.ResultPollStarted, &p.SourceURL, &p.ContentParsed, &p.RawText, &p.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -98,8 +167,8 @@ func GetUserPosts(userID int64, limit, offset int) ([]UserPost, error) {
 	rows, err := DB.Query(`
 		SELECT up.id,
 		       p.id, p.telegram_msg_id, p.channel_username, p.channel_id, p.title, p.prizes,
-		       p.end_date, p.results_url, p.results_in_same_post, p.is_completed,
-		       p.source_url, p.content_parsed, p.raw_text, p.created_at
+		       p.end_date, p.has_end_time, p.results_url, p.results_in_same_post, p.is_completed,
+		       p.result_poll_started, p.source_url, p.content_parsed, p.raw_text, p.created_at
 		FROM user_posts up
 		JOIN posts p ON p.id = up.post_id
 		WHERE up.user_id = ?
@@ -140,8 +209,8 @@ func GetLastUserPosts(userID int64, limit int) ([]UserPost, error) {
 	rows, err := DB.Query(`
 		SELECT up.id,
 		       p.id, p.telegram_msg_id, p.channel_username, p.channel_id, p.title, p.prizes,
-		       p.end_date, p.results_url, p.results_in_same_post, p.is_completed,
-		       p.source_url, p.content_parsed, p.raw_text, p.created_at
+		       p.end_date, p.has_end_time, p.results_url, p.results_in_same_post, p.is_completed,
+		       p.result_poll_started, p.source_url, p.content_parsed, p.raw_text, p.created_at
 		FROM user_posts up
 		JOIN posts p ON p.id = up.post_id
 		WHERE up.user_id = ?
@@ -162,9 +231,9 @@ func scanUserPosts(rows *sql.Rows) ([]UserPost, error) {
 		if err := rows.Scan(
 			&up.UserPostID,
 			&p.ID, &p.TelegramMsgID, &p.ChannelUsername, &p.ChannelID,
-			&p.Title, &p.Prizes, &p.EndDate, &p.ResultsURL,
+			&p.Title, &p.Prizes, &p.EndDate, &p.HasEndTime, &p.ResultsURL,
 			&p.ResultsInSamePost, &p.IsCompleted,
-			&p.SourceURL, &p.ContentParsed, &p.RawText, &p.CreatedAt,
+			&p.ResultPollStarted, &p.SourceURL, &p.ContentParsed, &p.RawText, &p.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -213,6 +282,23 @@ func scanPosts(rows *sql.Rows) ([]*Post, error) {
 			&p.Title, &p.Prizes, &p.EndDate, &p.ResultsURL,
 			&p.ResultsInSamePost, &p.IsCompleted,
 			&p.SourceURL, &p.ContentParsed, &p.RawText, &p.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		list = append(list, p)
+	}
+	return list, rows.Err()
+}
+
+func scanPostsFull(rows *sql.Rows) ([]*Post, error) {
+	var list []*Post
+	for rows.Next() {
+		p := &Post{}
+		if err := rows.Scan(
+			&p.ID, &p.TelegramMsgID, &p.ChannelUsername, &p.ChannelID,
+			&p.Title, &p.Prizes, &p.EndDate, &p.HasEndTime, &p.ResultsURL,
+			&p.ResultsInSamePost, &p.IsCompleted,
+			&p.ResultPollStarted, &p.SourceURL, &p.ContentParsed, &p.RawText, &p.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

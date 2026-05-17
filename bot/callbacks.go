@@ -78,12 +78,20 @@ func handleCallback(c tele.Context) error {
 		return adminDeletePost(c, parseInt64(arg))
 	case "admin_complete_post":
 		return adminCompletePost(c, parseInt64(arg))
+	case "admin_ban_post":
+		return adminBanPost(c, parseInt64(arg))
 	case "admin_broadcast":
 		return adminBroadcastPrompt(c)
 	case "admin_search":
 		return adminSearchPrompt(c)
 	case "admin_menu":
 		return showAdminMenu(c)
+	case "support_start":
+		_ = c.Respond()
+		return supportStart(c)
+	case "support_done":
+		_ = c.Respond()
+		return supportDone(c)
 	}
 	return c.Respond()
 }
