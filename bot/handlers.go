@@ -12,7 +12,10 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-var reTMeLink = regexp.MustCompile(`(?i)https?://t\.me/([a-zA-Z0-9_]+)/(\d+)`)
+var (
+	reTMeLink        = regexp.MustCompile(`(?i)https?://t\.me/([a-zA-Z0-9_]+)/(\d+)`)
+	reTMeLinkPrivate = regexp.MustCompile(`(?i)https?://t\.me/c/(\d+)/(\d+)`)
+)
 
 func handleText(c tele.Context) error {
 	msg := c.Message()
@@ -41,6 +44,9 @@ func handleText(c tele.Context) error {
 	}
 
 	text := parser.NormalizeText(msg.Text)
+	if m := reTMeLinkPrivate.FindStringSubmatch(text); m != nil {
+		return processLinkByID(c, u, parseInt64(m[1]), parseInt64(m[2]), text)
+	}
 	if m := reTMeLink.FindStringSubmatch(text); m != nil {
 		return processLink(c, u, m[1], parseInt64(m[2]), text)
 	}
@@ -69,6 +75,9 @@ func handleMedia(c tele.Context) error {
 	caption := msg.Caption
 	if caption == "" {
 		return nil
+	}
+	if m := reTMeLinkPrivate.FindStringSubmatch(caption); m != nil {
+		return processLinkByID(c, u, parseInt64(m[1]), parseInt64(m[2]), caption)
 	}
 	if m := reTMeLink.FindStringSubmatch(caption); m != nil {
 		return processLink(c, u, m[1], parseInt64(m[2]), caption)
@@ -105,18 +114,21 @@ func processForward(c tele.Context, u *db.User, msg *tele.Message) error {
 func processLink(c tele.Context, u *db.User, channelUser string, msgID int64, rawURL string) error {
 	sourceURL := fmt.Sprintf("https://t.me/%s/%d", channelUser, msgID)
 
-	var text string
+	var (
+		text      string
+		dumpMsgID int64
+	)
 	if config.C.DumpChatID != 0 {
 		dumped, err := B.Forward(&tele.Chat{ID: config.C.DumpChatID}, &tele.Message{
 			Chat: &tele.Chat{Username: channelUser},
 			ID:   int(msgID),
 		})
 		if err == nil && dumped != nil {
+			dumpMsgID = int64(dumped.ID)
 			text = dumped.Text
 			if text == "" {
 				text = dumped.Caption
 			}
-			B.Delete(dumped)
 		}
 	}
 
@@ -125,6 +137,7 @@ func processLink(c tele.Context, u *db.User, channelUser string, msgID int64, ra
 			TelegramMsgID:   msgID,
 			ChannelUsername: channelUser,
 			SourceURL:       sourceURL,
+			DumpMsgID:       dumpMsgID,
 			ContentParsed:   false,
 			Title:           "Розыгрыш из " + channelUser,
 		}
@@ -135,10 +148,56 @@ func processLink(c tele.Context, u *db.User, channelUser string, msgID int64, ra
 		return linkAndReply(c, u, created, isNew, false)
 	}
 
-	return processGiveawayText(c, u, nil, text, 0, msgID, channelUser, sourceURL)
+	return processGiveawayTextWithDump(c, u, text, 0, msgID, channelUser, sourceURL, dumpMsgID)
+}
+
+func processLinkByID(c tele.Context, u *db.User, rawChannelID, msgID int64, _ string) error {
+	channelID := -(rawChannelID + 1_000_000_000_000)
+	sourceURL := fmt.Sprintf("https://t.me/c/%d/%d", rawChannelID, msgID)
+
+	var (
+		text      string
+		dumpMsgID int64
+	)
+	if config.C.DumpChatID != 0 {
+		dumped, err := B.Forward(&tele.Chat{ID: config.C.DumpChatID}, &tele.Message{
+			Chat: &tele.Chat{ID: channelID},
+			ID:   int(msgID),
+		})
+		if err == nil && dumped != nil {
+			dumpMsgID = int64(dumped.ID)
+			text = dumped.Text
+			if text == "" {
+				text = dumped.Caption
+			}
+		}
+	}
+
+	if text == "" {
+		_ = c.Send("⚠️ Не удалось прочитать содержимое поста по ссылке — бот не состоит в этом канале. Лучше перешли сам пост напрямую в бот.")
+		p := &db.Post{
+			TelegramMsgID: msgID,
+			ChannelID:     channelID,
+			SourceURL:     sourceURL,
+			DumpMsgID:     dumpMsgID,
+			ContentParsed: false,
+			Title:         "Розыгрыш из канала",
+		}
+		created, isNew, err := db.CreateOrGetPost(p)
+		if err != nil {
+			return c.Send("❌ Ошибка при сохранении")
+		}
+		return linkAndReply(c, u, created, isNew, false)
+	}
+
+	return processGiveawayTextWithDump(c, u, text, channelID, msgID, "", sourceURL, dumpMsgID)
 }
 
 func processGiveawayText(c tele.Context, u *db.User, _ *tele.Message, text string, channelID, msgID int64, channelUser, sourceURL string) error {
+	return processGiveawayTextWithDump(c, u, text, channelID, msgID, channelUser, sourceURL, 0)
+}
+
+func processGiveawayTextWithDump(c tele.Context, u *db.User, text string, channelID, msgID int64, channelUser, sourceURL string, dumpMsgID int64) error {
 	info := parser.ParseGiveaway(text)
 	if !info.IsGiveaway {
 		return c.Send("⚠️ Данный пост не является розыгрышем")
@@ -146,6 +205,8 @@ func processGiveawayText(c tele.Context, u *db.User, _ *tele.Message, text strin
 	if info.EndDate != nil && info.EndDate.Before(time.Now()) {
 		return c.Send("⚠️ Дата завершения этого розыгрыша уже прошла.")
 	}
+
+	isPrivate := channelUser == "" && channelID != 0
 
 	p := &db.Post{
 		TelegramMsgID:     msgID,
@@ -158,6 +219,7 @@ func processGiveawayText(c tele.Context, u *db.User, _ *tele.Message, text strin
 		SourceURL:         sourceURL,
 		ContentParsed:     true,
 		RawText:           text,
+		DumpMsgID:         dumpMsgID,
 	}
 	if len(info.Prizes) > 0 {
 		p.Prizes = strings.Join(info.Prizes, "\n")
@@ -167,10 +229,15 @@ func processGiveawayText(c tele.Context, u *db.User, _ *tele.Message, text strin
 	if err != nil {
 		return c.Send("❌ Ошибка при сохранении.")
 	}
-	return linkAndReply(c, u, created, isNew, true)
+	if dumpMsgID != 0 && created.DumpMsgID == 0 {
+		_ = db.SaveDumpMsgID(created.ID, dumpMsgID)
+		created.DumpMsgID = dumpMsgID
+	}
+	return linkAndReply(c, u, created, isNew, true, isPrivate)
 }
 
-func linkAndReply(c tele.Context, u *db.User, p *db.Post, isNewPost bool, parsed bool) error {
+func linkAndReply(c tele.Context, u *db.User, p *db.Post, isNewPost bool, parsed bool, flags ...bool) error {
+	isPrivate := len(flags) > 0 && flags[0]
 	alreadyHas, _ := db.UserAlreadyHasPost(u.ID, p.ID)
 	if !alreadyHas {
 		if err := db.AddUserPost(u.ID, p.ID); err != nil {
@@ -211,12 +278,18 @@ func linkAndReply(c tele.Context, u *db.User, p *db.Post, isNewPost bool, parsed
 	if !parsed {
 		sb.WriteString("\n⚠️ Содержимое поста недоступно. Сохранена только ссылка.")
 	}
+	if isPrivate {
+		sb.WriteString("\n\n⚠️ Канал без публичного username — результаты розыгрыша боту видны не будут, но уведомление о завершении всё равно придёт.")
+	}
 
 	menu := B.NewMarkup()
-	menu.Inline(
-		menu.Row(menu.Data("📋 Мои розыгрыши", "my_list:0")),
-		menu.Row(menu.Data("🏠 Главное меню", "main_menu")),
-	)
+	var rows []tele.Row
+	if p.DumpMsgID != 0 && config.C.DumpChatID != 0 {
+		rows = append(rows, menu.Row(menu.Data("📬 Посмотреть пост", fmt.Sprintf("view_dump:%d", p.ID))))
+	}
+	rows = append(rows, menu.Row(menu.Data("📋 Мои розыгрыши", "my_list:0")))
+	rows = append(rows, menu.Row(menu.Data("🏠 Главное меню", "main_menu")))
+	menu.Inline(rows...)
 	return c.Send(sb.String(), &tele.SendOptions{ParseMode: tele.ModeHTML, DisableWebPagePreview: true}, menu)
 }
 

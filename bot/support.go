@@ -37,10 +37,23 @@ func supportDone(c tele.Context) error {
 	if sender == nil {
 		return nil
 	}
+
+	name := sender.FirstName
+	if sender.Username != "" {
+		name = fmt.Sprintf("%s (@%s)", sender.FirstName, sender.Username)
+	}
+
 	supportMu.Lock()
 	delete(supportUsers, sender.ID)
 	delete(userToMsgID, sender.ID)
 	supportMu.Unlock()
+
+	if config.C.AdminChatID != 0 {
+		B.Send(&tele.Chat{ID: config.C.AdminChatID},
+			fmt.Sprintf("✅ Пользователь %s [<code>%d</code>] закрыл тикет — проблема решена.", escapeHTML(name), sender.ID),
+			&tele.SendOptions{ParseMode: tele.ModeHTML},
+		)
+	}
 
 	return c.Edit(
 		"✅ Рады помочь! Обращайся, если что-то ещё нужно.",

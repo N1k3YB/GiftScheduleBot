@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/N1k3YB/GiftScheduleBot/config"
 	"github.com/N1k3YB/GiftScheduleBot/db"
 	"github.com/N1k3YB/GiftScheduleBot/parser"
 	tele "gopkg.in/telebot.v3"
@@ -88,6 +89,9 @@ func handleCallback(c tele.Context) error {
 		return showAdminMenu(c)
 	case "admin_check_config":
 		return adminCheckConfig(c)
+	case "view_dump":
+		_ = c.Respond()
+		return viewDumpPost(c, parseInt64(arg))
 	case "support_start":
 		_ = c.Respond()
 		return supportStart(c)
@@ -234,6 +238,21 @@ func showProfile(c tele.Context) error {
 	)
 
 	return editOrSend(c, sb.String(), menu)
+}
+
+func viewDumpPost(c tele.Context, postID int64) error {
+	p, err := db.GetPostByID(postID)
+	if err != nil || p.DumpMsgID == 0 {
+		return c.Send("⚠️ Пост не найден в хранилище.")
+	}
+	_, err = B.Forward(c.Sender(), &tele.Message{
+		ID:   int(p.DumpMsgID),
+		Chat: &tele.Chat{ID: config.C.DumpChatID},
+	})
+	if err != nil {
+		return c.Send("⚠️ Не удалось переслать пост. Возможно, он был удалён из хранилища.")
+	}
+	return nil
 }
 
 func notifyIcon(on bool) string {

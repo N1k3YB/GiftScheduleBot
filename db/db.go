@@ -83,6 +83,7 @@ func migrate() {
 	for _, s := range []string{
 		`ALTER TABLE posts ADD COLUMN has_end_time BOOLEAN NOT NULL DEFAULT 0`,
 		`ALTER TABLE posts ADD COLUMN result_poll_started BOOLEAN NOT NULL DEFAULT 0`,
+		`ALTER TABLE posts ADD COLUMN dump_msg_id INTEGER NOT NULL DEFAULT 0`,
 	} {
 		DB.Exec(s)
 	}
