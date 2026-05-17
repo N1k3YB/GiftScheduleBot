@@ -37,6 +37,7 @@ func showAdminMenu(c tele.Context) error {
 			menu.Data("📢 Рассылка", "admin_broadcast"),
 			menu.Data("🔍 Поиск юзера", "admin_search"),
 		),
+		menu.Row(menu.Data("⚙️ Проверить настройки", "admin_check_config")),
 		menu.Row(menu.Data("❌ Закрыть", "close")),
 	)
 	return editOrSend(c, text, menu)
@@ -478,4 +479,78 @@ func handleSearch(c tele.Context, query string) bool {
 	}
 	_ = c.Send(sb.String(), &tele.SendOptions{ParseMode: tele.ModeHTML})
 	return true
+}
+
+func adminCheckConfig(c tele.Context) error {
+	sender := c.Sender()
+	if sender == nil || !config.IsAdmin(sender.ID) {
+		return c.Respond()
+	}
+	_ = c.Respond()
+
+	cfg := config.C
+	var sb strings.Builder
+	sb.WriteString("⚙️ <b>Проверка настроек</b>\n\n")
+
+	ok := "✅"
+	fail := "❌"
+	warn := "⚠️"
+
+	sb.WriteString("<b>DUMP_CHAT_ID</b>\n")
+	if cfg.DumpChatID == 0 {
+		sb.WriteString(fmt.Sprintf("%s Не задан — бот не сможет читать содержимое постов по ссылке.\n", fail))
+		sb.WriteString("  → Создай приватный канал, добавь бота админом, укажи ID в DUMP_CHAT_ID\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("  ID: <code>%d</code>\n", cfg.DumpChatID))
+		sent, err := B.Send(&tele.Chat{ID: cfg.DumpChatID}, "⚙️ проверка связи", &tele.SendOptions{})
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("%s Отправка не работает: %v\n", fail, err))
+			sb.WriteString("  → Убедись, что бот добавлен в чат как администратор\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("%s Отправка работает\n", ok))
+			if err2 := B.Delete(sent); err2 != nil {
+				sb.WriteString(fmt.Sprintf("%s Удаление не работает — добавь боту право удалять сообщения\n", warn))
+			} else {
+				sb.WriteString(fmt.Sprintf("%s Удаление работает\n", ok))
+			}
+		}
+	}
+
+	sb.WriteString("\n<b>ADMIN_CHAT_ID</b>\n")
+	if cfg.AdminChatID == 0 {
+		sb.WriteString(fmt.Sprintf("%s Не задан — техподдержка работать не будет.\n", fail))
+		sb.WriteString("  → Создай чат/группу, добавь бота, укажи ID в ADMIN_CHAT_ID\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("  ID: <code>%d</code>\n", cfg.AdminChatID))
+		sent, err := B.Send(&tele.Chat{ID: cfg.AdminChatID}, "⚙️ проверка связи", &tele.SendOptions{})
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("%s Отправка не работает: %v\n", fail, err))
+			sb.WriteString("  → Убедись, что бот добавлен в чат как участник/администратор\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("%s Отправка работает\n", ok))
+			B.Delete(sent)
+		}
+	}
+
+	sb.WriteString("\n<b>BOT_TOKEN</b>\n")
+	if cfg.BotToken == "" {
+		sb.WriteString(fmt.Sprintf("%s Не задан!\n", fail))
+	} else {
+		sb.WriteString(fmt.Sprintf("%s Задан\n", ok))
+	}
+
+	sb.WriteString("\n<b>ADMIN_IDS</b>\n")
+	if len(cfg.AdminIDs) == 0 {
+		sb.WriteString(fmt.Sprintf("%s Не задан — никто не сможет войти в админку!\n", fail))
+	} else {
+		ids := make([]string, len(cfg.AdminIDs))
+		for i, id := range cfg.AdminIDs {
+			ids[i] = fmt.Sprintf("<code>%d</code>", id)
+		}
+		sb.WriteString(fmt.Sprintf("%s %s\n", ok, strings.Join(ids, ", ")))
+	}
+
+	menu := B.NewMarkup()
+	menu.Inline(menu.Row(menu.Data("◀️ Назад", "admin_menu")))
+	return editOrSend(c, sb.String(), menu)
 }

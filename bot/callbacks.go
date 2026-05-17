@@ -86,6 +86,8 @@ func handleCallback(c tele.Context) error {
 		return adminSearchPrompt(c)
 	case "admin_menu":
 		return showAdminMenu(c)
+	case "admin_check_config":
+		return adminCheckConfig(c)
 	case "support_start":
 		_ = c.Respond()
 		return supportStart(c)
