@@ -8,6 +8,7 @@ import (
 )
 
 var msk = time.FixedZone("MSK", 3*3600)
+var timeNow = time.Now
 
 func NormalizeText(s string) string {
 	var b strings.Builder
@@ -66,11 +67,39 @@ var monthNames = map[string]time.Month{
 
 var (
 	reDMY      = regexp.MustCompile(`\b(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})\b`)
-	reDMonthY  = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|january|february|march|april|june|july|august|september|october|november|december)\s*(\d{4})?\b`)
-	reDMonth   = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b`)
+	reDMonthY  = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|january|february|march|april|june|july|august|september|october|november|december)\s*(\d{4})?`)
+	reDMonth   = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)`)
 	reTime     = regexp.MustCompile(`\b(?:в\s*)?(\d{1,2})[:. ](\d{2})\s*(?:мск|msk|по\s+москве)?\b`)
 	reRelative = regexp.MustCompile(`(?i)\b(сегодня|завтра|послезавтра|через\s+(\d+)\s+д(?:ень|ня|ней))\b`)
+	reDM       = regexp.MustCompile(`\b(\d{1,2})[./](\d{1,2})\b`)
+	reWeekday  = regexp.MustCompile(`(?i)(?:^|[^а-яА-ЯёЁa-zA-Z0-9_])(?:в|во)?\s*(понедельник|понедельнику|вторник|среду|среда|среде|четверг|четвергу|пятницу|пятница|пятнице|субботу|суббота|субботе|воскресенье|пн|вт|ср|чт|пт|сб|вс)(?:$|[^а-яА-ЯёЁa-zA-Z0-9_])`)
 )
+
+var weekdayNames = map[string]time.Weekday{
+	"понедельник":  time.Monday,
+	"понедельнику": time.Monday,
+	"пн":           time.Monday,
+	"вторник":      time.Tuesday,
+	"вт":           time.Tuesday,
+	"среду":        time.Wednesday,
+	"среда":        time.Wednesday,
+	"среде":        time.Wednesday,
+	"ср":           time.Wednesday,
+	"четверг":      time.Thursday,
+	"четвергу":     time.Thursday,
+	"чт":           time.Thursday,
+	"пятницу":      time.Friday,
+	"пятница":      time.Friday,
+	"пятнице":      time.Friday,
+	"пт":           time.Friday,
+	"субботу":      time.Saturday,
+	"суббота":      time.Saturday,
+	"субботе":      time.Saturday,
+	"сб":           time.Saturday,
+	"воскресенье":  time.Sunday,
+	"воскресенью":  time.Sunday,
+	"вс":           time.Sunday,
+}
 
 type GiveawayInfo struct {
 	IsGiveaway        bool
@@ -145,9 +174,10 @@ func extractPrizes(text string) []string {
 }
 
 func extractDate(text string) (*time.Time, bool) {
-	now := time.Now().In(msk)
+	now := timeNow().In(msk)
 
-	if m := reRelative.FindStringSubmatch(text); m != nil {
+	if loc := reRelative.FindStringIndex(text); loc != nil {
+		m := reRelative.FindStringSubmatch(text)
 		kw := strings.ToLower(m[1])
 		var base time.Time
 		switch {
@@ -164,7 +194,8 @@ func extractDate(text string) (*time.Time, bool) {
 			}
 		}
 		if !base.IsZero() {
-			h, mi := extractTime(text)
+			cleanText := text[:loc[0]] + strings.Repeat(" ", loc[1]-loc[0]) + text[loc[1]:]
+			h, mi := extractTime(cleanText)
 			hasTime := h >= 0
 			if !hasTime {
 				h, mi = 0, 0
@@ -174,13 +205,15 @@ func extractDate(text string) (*time.Time, bool) {
 		}
 	}
 
-	if m := reDMY.FindStringSubmatch(text); m != nil {
+	if loc := reDMY.FindStringIndex(text); loc != nil {
+		m := reDMY.FindStringSubmatch(text)
 		d, mo, y := parseInt(m[1]), parseInt(m[2]), parseInt(m[3])
 		if y < 100 {
 			y += 2000
 		}
 		if d > 0 && d <= 31 && mo > 0 && mo <= 12 {
-			h, mi := extractTime(text)
+			cleanText := text[:loc[0]] + strings.Repeat(" ", loc[1]-loc[0]) + text[loc[1]:]
+			h, mi := extractTime(cleanText)
 			hasTime := h >= 0
 			if !hasTime {
 				h, mi = 0, 0
@@ -191,7 +224,9 @@ func extractDate(text string) (*time.Time, bool) {
 			}
 		}
 	}
-	if m := reDMonthY.FindStringSubmatch(text); m != nil {
+
+	if loc := reDMonthY.FindStringIndex(text); loc != nil {
+		m := reDMonthY.FindStringSubmatch(text)
 		d := parseInt(m[1])
 		mo := monthNames[strings.ToLower(m[2])]
 		y := now.Year()
@@ -199,7 +234,8 @@ func extractDate(text string) (*time.Time, bool) {
 			y = parseInt(m[3])
 		}
 		if d > 0 && d <= 31 && mo > 0 {
-			h, mi := extractTime(text)
+			cleanText := text[:loc[0]] + strings.Repeat(" ", loc[1]-loc[0]) + text[loc[1]:]
+			h, mi := extractTime(cleanText)
 			hasTime := h >= 0
 			if !hasTime {
 				h, mi = 0, 0
@@ -210,12 +246,15 @@ func extractDate(text string) (*time.Time, bool) {
 			}
 		}
 	}
-	if m := reDMonth.FindStringSubmatch(text); m != nil {
+
+	if loc := reDMonth.FindStringIndex(text); loc != nil {
+		m := reDMonth.FindStringSubmatch(text)
 		d := parseInt(m[1])
 		mo := monthNames[strings.ToLower(m[2])]
 		y := now.Year()
 		if d > 0 && d <= 31 && mo > 0 {
-			h, mi := extractTime(text)
+			cleanText := text[:loc[0]] + strings.Repeat(" ", loc[1]-loc[0]) + text[loc[1]:]
+			h, mi := extractTime(cleanText)
 			hasTime := h >= 0
 			if !hasTime {
 				h, mi = 0, 0
@@ -227,7 +266,60 @@ func extractDate(text string) (*time.Time, bool) {
 			return &t, hasTime
 		}
 	}
+
+	if loc := reDM.FindStringIndex(text); loc != nil {
+		m := reDM.FindStringSubmatch(text)
+		d, mo := parseInt(m[1]), parseInt(m[2])
+		if d > 0 && d <= 31 && mo > 0 && mo <= 12 {
+			y := now.Year()
+			cleanText := text[:loc[0]] + strings.Repeat(" ", loc[1]-loc[0]) + text[loc[1]:]
+			h, mi := extractTime(cleanText)
+			hasTime := h >= 0
+			if !hasTime {
+				h, mi = 0, 0
+			}
+			t := time.Date(y, time.Month(mo), d, h, mi, 0, 0, msk)
+			if t.Before(now) {
+				t = time.Date(y+1, time.Month(mo), d, h, mi, 0, 0, msk)
+			}
+			return &t, hasTime
+		}
+	}
+
+	if loc := reWeekday.FindStringIndex(text); loc != nil {
+		m := reWeekday.FindStringSubmatch(text)
+		wdayStr := strings.ToLower(m[1])
+		if wday, ok := weekdayNames[wdayStr]; ok {
+			cleanText := text[:loc[0]] + strings.Repeat(" ", loc[1]-loc[0]) + text[loc[1]:]
+			h, mi := extractTime(cleanText)
+			hasTime := h >= 0
+
+			baseDate := getNextWeekdayDate(now, wday, h, mi)
+
+			if !hasTime {
+				h, mi = 0, 0
+			}
+			t := time.Date(baseDate.Year(), baseDate.Month(), baseDate.Day(), h, mi, 0, 0, msk)
+			return &t, hasTime
+		}
+	}
+
 	return nil, false
+}
+
+func getNextWeekdayDate(now time.Time, target time.Weekday, hour, min int) time.Time {
+	days := int(target - now.Weekday())
+	if days < 0 {
+		days += 7
+	} else if days == 0 {
+		if hour >= 0 {
+			targetTime := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, now.Location())
+			if !targetTime.After(now) {
+				days += 7
+			}
+		}
+	}
+	return now.AddDate(0, 0, days)
 }
 
 func extractTime(text string) (hour, min int) {

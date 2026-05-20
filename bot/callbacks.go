@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/N1k3YB/GiftScheduleBot/config"
 	"github.com/N1k3YB/GiftScheduleBot/db"
@@ -354,6 +355,8 @@ func checkResult(c tele.Context, postID int64) error {
 		msg := "⏳ Розыгрыш ещё не завершён."
 		if p.EndDate != nil {
 			msg += fmt.Sprintf("\nОжидаемая дата завершения: <b>%s</b>", p.EndDate.Format("02.01.2006 15:04"))
+			timeLeft := p.EndDate.Sub(time.Now())
+			msg += fmt.Sprintf("\nОсталось: <b>%s</b>", formatTimeLeft(timeLeft))
 		}
 		return editOrSend(c, msg, menu)
 	}
@@ -380,4 +383,41 @@ func checkResult(c tele.Context, postID int64) error {
 	menu := B.NewMarkup()
 	menu.Inline(menu.Row(menu.Data("◀️ Мои розыгрыши", "my_list:0")))
 	return editOrSend(c, sb.String(), menu)
+}
+
+func formatTimeLeft(d time.Duration) string {
+	if d <= 0 {
+		return "совсем скоро"
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", days, pluralize(days, "день", "дня", "дней")))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", hours, pluralize(hours, "час", "часа", "часов")))
+	}
+	if minutes > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", minutes, pluralize(minutes, "минуту", "минуты", "минут")))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+func pluralize(n int, one, two, five string) string {
+	n100 := n % 100
+	n10 := n % 10
+	if n100 >= 11 && n100 <= 19 {
+		return five
+	}
+	if n10 == 1 {
+		return one
+	}
+	if n10 >= 2 && n10 <= 4 {
+		return two
+	}
+	return five
 }
