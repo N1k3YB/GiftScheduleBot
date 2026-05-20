@@ -64,12 +64,22 @@ var monthNames = map[string]time.Month{
 	"october": time.October, "november": time.November, "december": time.December,
 }
 
+var weekdayNames = map[string]time.Weekday{
+	"понедельник": time.Monday, "вторник": time.Tuesday, "среду": time.Wednesday,
+	"среда": time.Wednesday, "четверг": time.Thursday, "пятницу": time.Friday,
+	"пятница": time.Friday, "субботу": time.Saturday, "суббота": time.Saturday,
+	"воскресенье": time.Sunday, "воскресение": time.Sunday,
+	"пн": time.Monday, "вт": time.Tuesday, "ср": time.Wednesday,
+	"чт": time.Thursday, "пт": time.Friday, "сб": time.Saturday, "вс": time.Sunday,
+}
+
 var (
 	reDMY      = regexp.MustCompile(`\b(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})\b`)
 	reDMonthY  = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|january|february|march|april|june|july|august|september|october|november|december)\s*(\d{4})?\b`)
 	reDMonth   = regexp.MustCompile(`(?i)\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b`)
 	reTime     = regexp.MustCompile(`\b(?:в\s*)?(\d{1,2})[:. ](\d{2})\s*(?:мск|msk|по\s+москве)?\b`)
 	reRelative = regexp.MustCompile(`(?i)\b(сегодня|завтра|послезавтра|через\s+(\d+)\s+д(?:ень|ня|ней))\b`)
+	reWeekday  = regexp.MustCompile(`(?i)(?:в\s+)?(понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|воскресение|пн|вт|ср|чт|пт|сб|вс)\b`)
 )
 
 type GiveawayInfo struct {
@@ -164,6 +174,25 @@ func extractDate(text string) (*time.Time, bool) {
 			}
 		}
 		if !base.IsZero() {
+			h, mi := extractTime(text)
+			hasTime := h >= 0
+			if !hasTime {
+				h, mi = 0, 0
+			}
+			t := time.Date(base.Year(), base.Month(), base.Day(), h, mi, 0, 0, msk)
+			return &t, hasTime
+		}
+	}
+
+	if m := reWeekday.FindStringSubmatch(text); m != nil {
+		dayName := strings.ToLower(m[1])
+		if wd, ok := weekdayNames[dayName]; ok {
+			base := now
+			daysUntil := int(wd) - int(base.Weekday())
+			if daysUntil <= 0 {
+				daysUntil += 7
+			}
+			base = base.AddDate(0, 0, daysUntil)
 			h, mi := extractTime(text)
 			hasTime := h >= 0
 			if !hasTime {
